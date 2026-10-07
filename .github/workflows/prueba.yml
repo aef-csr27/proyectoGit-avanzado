@@ -1,0 +1,22 @@
+name: Prueba self-hosted runner
+
+on:
+  push:
+
+jobs:
+  comparar-token:
+    runs-on: self-hosted
+
+    steps:
+      - name: Comparar DEV_TOKEN
+        env:
+          DEV_SECRET: ${{ secrets.DEV_TOKEN }}
+        shell: powershell
+        run: |
+          if ($env:DEV_SECRET -eq $env:LOCAL_DEV_TOKEN) {
+            Write-Host "Los tokens coinciden"
+          }
+          else {
+            Write-Host "Los tokens NO coinciden"
+            exit 1
+          }
