@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Añadir feature al README
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'feature/')
+        env:
+          FEATURE_BRANCH: ${{ github.head_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          line="Añadida feature: ${FEATURE_BRANCH}"
+
+          if grep -Fxq "$line" README.md; then
+            echo "La feature ya está en el README"
+            exit 0
+          fi
+
+          printf '\n%s\n' "$line" >> README.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Añadir feature ${FEATURE_BRANCH} al README"
+          git push origin "HEAD:${FEATURE_BRANCH}"
+
+  validate-dev:
+    needs: update-readme
+    runs-on: self-hosted
+    steps:
+      - name: Validar DEV_TOKEN
+        shell: powershell
+        env:
+          DEV_SECRET: ${{ secrets.DEV_TOKEN }}
+        run: |
+          if ($env:DEV_SECRET -eq $env:LOCAL_DEV_TOKEN) {
+            Write-Host "Los tokens coinciden"
+          } else {
+            Write-Host "Los tokens NO coinciden"
+            exit 1
+          }

@@ -1,0 +1,31 @@
+      - name: Incrementar versión
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="<!-- cd-commit-${COMMIT_SHA} -->"
+
+          if grep -Fq "$marker" README.md; then
+            echo "Esta publicación ya incrementó la versión"
+            exit 0
+          fi
+
+          current=$(grep -oE '^AppVersion-[0-9]+' README.md | head -n 1 | cut -d- -f2)
+          if [[ -z "$current" ]]; then
+            echo "No se encontró AppVersion en README.md"
+            exit 1
+          fi
+
+          next=$((current + 1))
+          timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          sed -i -E "0,/^AppVersion-[0-9]+/s//AppVersion-${next} - ${timestamp}/" README.md
+          printf '\n%s\n' "$marker" >> README.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Incrementar versión a AppVersion-${next}"
+          git push origin "HEAD:${TARGET_BRANCH}"
