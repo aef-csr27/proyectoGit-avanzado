@@ -1,0 +1,74 @@
+name: CD
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Incrementar versión
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="<!-- cd-pr-${PR_NUMBER} -->"
+
+          if grep -Fq "$marker" README.md; then
+            echo "Esta versión ya se actualizó para este PR"
+            exit 0
+          fi
+
+          current=$(grep -oE '^AppVersion-[0-9]+' README.md | head -n 1 | cut -d- -f2)
+          if [[ -z "$current" ]]; then
+            echo "No se encontró AppVersion en README.md"
+            exit 1
+          fi
+
+          next=$((current + 1))
+          timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          sed -i -E "0,/^AppVersion-[0-9]+/s//AppVersion-${next} - ${timestamp}/" README.md
+          printf '\n%s\n' "$marker" >> README.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Incrementar versión a AppVersion-${next}"
+          git push origin "HEAD:${PR_BRANCH}"
+
+  validate-prod:
+    needs: update-readme
+    runs-on: self-hosted
+    steps:
+      - name: Validar PROD_TOKEN
+        shell: powershell
+        env:
+          PROD_SECRET: ${{ secrets.PROD_TOKEN }}
+        run: |
+          if ($env:PROD_SECRET -eq $env:LOCAL_PROD_TOKEN) {
+            Write-Host "Los tokens de producción coinciden"
+          } else {
+            Write-Host "Los tokens de producción NO coinciden"
+            exit 1
+          }
