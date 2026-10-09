@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   update-readme:
     runs-on: ubuntu-latest
@@ -22,19 +26,25 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Añadir feature al README
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'feature/')
+        env:
+          FEATURE_BRANCH: ${{ github.head_ref }}
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BRANCH="${{ github.event.pull_request.head.ref }}"
-          else
-            BRANCH="${{ github.ref_name }}"
+          set -euo pipefail
+          line="Añadida feature: ${FEATURE_BRANCH}"
+
+          if grep -Fxq "$line" README.md; then
+            echo "La feature ya está en el README"
+            exit 0
           fi
-          echo "Añadida feature: $BRANCH" >> README.md
+
+          printf '\n%s\n' "$line" >> README.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md
-          git commit -m "Añadir feature $BRANCH al README" || exit 0
-          git push
+          git commit -m "Añadir feature ${FEATURE_BRANCH} al README"
+          git push origin "HEAD:${FEATURE_BRANCH}"
 
   validate-dev:
     needs: update-readme
