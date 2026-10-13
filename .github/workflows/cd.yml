@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: cd-${{ github.event.pull_request.number || github.ref }}
@@ -25,23 +26,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Incrementar versión
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          TARGET_BRANCH: ${{ github.ref_name }}
-          COMMIT_SHA: ${{ github.sha }}
+      - name: Preparar incremento de versión
+        id: bump
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'version-bump') }}
         shell: bash
         run: |
           set -euo pipefail
-          marker="<!-- cd-commit-${COMMIT_SHA} -->"
-
-          if grep -Fq "$marker" README.md; then
-            echo "Esta publicación ya incrementó la versión"
-            exit 0
-          fi
-
           current=$(grep -oE '^AppVersion-[0-9]+' README.md | head -n 1 | cut -d- -f2)
           if [[ -z "$current" ]]; then
             echo "No se encontró AppVersion en README.md"
@@ -51,13 +42,18 @@ jobs:
           next=$((current + 1))
           timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           sed -i -E "0,/^AppVersion-[0-9]+/s//AppVersion-${next} - ${timestamp}/" README.md
-          printf '\n%s\n' "$marker" >> README.md
+          echo "next=$next" >> "$GITHUB_OUTPUT"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          git commit -m "Incrementar versión a AppVersion-${next}"
-          git push origin "HEAD:${TARGET_BRANCH}"
+      - name: Crear PR para actualizar versión
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'version-bump') }}
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: automation/version-bump-${{ github.sha }}
+          base: main
+          add-paths: README.md
+          commit-message: "[version-bump] AppVersion-${{ steps.bump.outputs.next }}"
+          title: "[version-bump] AppVersion-${{ steps.bump.outputs.next }}"
+          body: "Incremento automático de versión con fecha y hora."
 
   validate-prod:
     needs: update-readme
